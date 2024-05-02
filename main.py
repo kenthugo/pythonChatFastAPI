@@ -1,10 +1,13 @@
-
+import os
+import httpx
+from dotenv import load_dotenv
 from fastapi import FastAPI
+from fastapi_cors import CORS
 from pydantic import BaseModel, Field
 import uuid
 from datetime import datetime
-
-app = FastAPI()
+from openai import OpenAI, AssistantEventHandler
+from typing_extensions import override
 
 class User(BaseModel):
     _userId: str = Field(default_factory=uuid.uuid4(), hidden=True)
@@ -18,6 +21,112 @@ class Message(BaseModel):
     senderUserId: str
     receiverUserId: str
     message: str
+
+class SummaryText(BaseModel):
+   text: str
+
+load_dotenv()
+
+app = FastAPI()
+CORS(app)
+
+openAIAPIKey = os.environ.get("OPENAI_API_KEY")
+client = OpenAI(api_key=openAIAPIKey)
+
+@app.get("/bots/list")
+async def list_bots():
+    
+    headers = {
+      "Content-Type": "application/json",
+      "Authorization": f"Bearer {openAIAPIKey}",
+      "OpenAI-Beta": "assistants=v2",
+    }
+    async with httpx.AsyncClient() as client:
+        response = await client.get("https://api.openai.com/v1/assistants", headers=headers)
+        data = response.json()
+        print(data)
+        return(data)
+    
+@app.get("/bots/delete/{assistant_id}")
+async def delete_bots(assistant_id: str):
+    headers = {
+      "Content-Type": "application/json",
+      "Authorization": f"Bearer {openAIAPIKey}",
+      "OpenAI-Beta": "assistants=v2",
+    }
+    async with httpx.AsyncClient() as client:
+        response = await client.delete(f"https://api.openai.com/v1/assistants/{assistant_id}", headers=headers)
+        data = response.json()
+        print(data)
+        return(data)
+
+@app.get("/threads/list")
+async def list_bots():
+    
+    headers = {
+      "Content-Type": "application/json",
+      "Authorization": f"Bearer {openAIAPIKey}",
+      "OpenAI-Beta": "assistants=v2",
+    }
+    async with httpx.AsyncClient() as client:
+        response = await client.get("https://api.openai.com/v1/threads", headers=headers)
+        data = response.json()
+        print(data)
+        return(data)
+    
+@app.post("/summary/")
+async def add_summary(summaryText: SummaryText):
+    assistant = client.beta.assistants.create(
+  name="Summary Sage",
+  instructions="""You are a professional AI summarization assistant.
+  When a user provides text input, use the following step-by-step instructions to respond to user inputs. 
+  Step 1 - The user will provide you with text.
+  Step 2 - Analyze the text carefully by reading and understanding all of it.
+  Step 3 - Identify the key points by extracting the most important information and key points from the text.
+  Step 4 - Summarize the text while prioritizing conciseness while maintaining clarity, use the shortest possible phrases to represent each key point. Focus on factual points and avoid including unnecessary opinions or details.
+  Step 5 - Present the summary by organizing it into a bulleted list.
+  Step 6 - Uphold contextual accuracy, ensuring the summary accurately reflects the context of the original text, even with the brevity""",
+  tools=[],
+  model="gpt-4-turbo",
+)
+    thread = client.beta.threads.create()
+    message = client.beta.threads.messages.create(
+  thread_id=thread.id,
+  role="user",
+  content=summaryText.text
+)
+    run = client.beta.threads.runs.create_and_poll(
+  thread_id=thread.id,
+  assistant_id=assistant.id,
+  instructions="""You are a professional AI summarization assistant.
+  When a user provides text input, use the following step-by-step instructions to respond to user inputs. 
+  Step 1 - The user will provide you with text.
+  Step 2 - Analyze the text carefully by reading and understanding all of it.
+  Step 3 - Identify the key points by extracting the most important information and key points from the text.
+  Step 4 - Summarize the text while prioritizing conciseness while maintaining clarity, use the shortest possible phrases to represent each key point. Focus on factual points and avoid including unnecessary opinions or details.
+  Step 5 - Present the summary by organizing it into a bulleted list.
+  Step 6 - Uphold contextual accuracy, ensuring the summary accurately reflects the context of the original text, even with the brevity"""
+)
+    
+    if run.status == 'completed': 
+        responseMessages = client.beta.threads.messages.list(
+            thread_id=thread.id
+        )
+        return responseMessages.data
+    else:   
+        return run.status
+
+@app.get("/testopenaiapi")
+async def test_openai_api():
+    completion = client.chat.completions.create(
+  model="gpt-3.5-turbo",
+  messages=[
+    {"role": "system", "content": "You are a poetic assistant, skilled in explaining complex programming concepts with creative flair."},
+    {"role": "user", "content": "Compose a poem that explains the concept of recursion in programming."}
+  ]
+)
+    return(completion.choices[0].message)
+
 
 # USERS MOCK DATABASE
 # FOR DEMO PURPOSES userId USES AN EXPECTED INCREMENTAL VALUE, OTHERWISE USE UUID
